@@ -1,0 +1,108 @@
+{
+  "name": "Retrieval QA Harness",
+  "description": "A tiny stateful retrieval harness with memory, tools, context, and evaluation.",
+  "nodes": [
+    {
+      "id": "task",
+      "type": "task",
+      "label": "Task",
+      "position": { "x": 80, "y": 120 },
+      "config": {
+        "question": "What is a harness in an AI system?",
+        "expected_answer": "context memory tools evaluation",
+        "success_metric": "contains_expected_answer",
+        "dataset": "toy_retrieval"
+      }
+    },
+    {
+      "id": "memory",
+      "type": "memory",
+      "label": "Working Memory",
+      "position": { "x": 340, "y": 40 },
+      "config": { "pool_limit": 5, "curated_limit": 3, "include_history": true }
+    },
+    {
+      "id": "context",
+      "type": "context_builder",
+      "label": "Context Builder",
+      "position": { "x": 340, "y": 220 },
+      "config": {
+        "include_task": true,
+        "include_pool": true,
+        "include_curated": true,
+        "include_history": true,
+        "token_budget": 1200
+      }
+    },
+    {
+      "id": "policy",
+      "type": "model_policy",
+      "label": "Model Policy",
+      "position": { "x": 620, "y": 160 },
+      "config": {
+        "policy_kind": "mock",
+        "max_steps": 6,
+        "explanation": "A deterministic teaching policy chooses search, read, curate, then finish."
+      }
+    },
+    {
+      "id": "tool_search",
+      "type": "tool",
+      "label": "Search Tool",
+      "position": { "x": 880, "y": 20 },
+      "config": {
+        "tool_name": "search_corpus",
+        "enabled": true,
+        "description": "Find candidate documents."
+      }
+    },
+    {
+      "id": "tool_read",
+      "type": "tool",
+      "label": "Read Tool",
+      "position": { "x": 880, "y": 115 },
+      "config": {
+        "tool_name": "read_doc",
+        "enabled": true,
+        "description": "Inspect a full document from memory."
+      }
+    },
+    {
+      "id": "tool_curate",
+      "type": "tool",
+      "label": "Curate Tool",
+      "position": { "x": 880, "y": 210 },
+      "config": {
+        "tool_name": "curate",
+        "enabled": true,
+        "description": "Keep compact evidence in context."
+      }
+    },
+    {
+      "id": "tool_finish",
+      "type": "tool",
+      "label": "Finish Tool",
+      "position": { "x": 880, "y": 305 },
+      "config": {
+        "tool_name": "finish",
+        "enabled": true,
+        "description": "Return the final answer."
+      }
+    },
+    {
+      "id": "evaluator",
+      "type": "evaluator",
+      "label": "Evaluator",
+      "position": { "x": 1160, "y": 200 },
+      "config": { "primary_metric": "contains_expected_answer", "track_costs": true }
+    }
+  ],
+  "edges": [
+    { "id": "task-context", "source": "task", "target": "context", "label": "question" },
+    { "id": "memory-context", "source": "memory", "target": "context", "label": "state" },
+    { "id": "context-policy", "source": "context", "target": "policy", "label": "prompt" },
+    { "id": "policy-tools", "source": "policy", "target": "tool_search", "label": "action" },
+    { "id": "tools-memory", "source": "tool_curate", "target": "memory", "label": "updates" },
+    { "id": "policy-evaluator", "source": "policy", "target": "evaluator", "label": "answer" }
+  ]
+}

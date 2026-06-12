@@ -1,0 +1,538 @@
+import type { TraceStep, RunResponse } from "../types";
+
+type Lang = "zh" | "en";
+
+interface OutputPanelProps {
+  runResult?: RunResponse;
+  generatedCode: string;
+  isRunning: boolean;
+  error?: string;
+  lang: Lang;
+}
+
+const ACTION_LABELS: Record<string, string> = {
+  search_corpus: "Search",
+  read_doc: "Read",
+  curate: "Save note",
+  verify: "Verify",
+  finish: "Answer",
+};
+
+const ACTION_LABELS_ZH: Record<string, string> = {
+  search_corpus: "搜索资料",
+  read_doc: "阅读资料",
+  curate: "保存重点",
+  verify: "核对说法",
+  finish: "提交答案",
+};
+
+function actionLabel(name: string, lang: Lang): string {
+  return (lang === "zh" ? ACTION_LABELS_ZH : ACTION_LABELS)[name] ?? name;
+}
+
+function actionToneClass(name: string): string {
+  return `action-${name}`;
+}
+
+const DOC_LABELS: Record<Lang, Record<string, string>> = {
+  zh: {
+    doc_map: "哈佛周边距离资料",
+    doc_hours: "营业时间资料",
+    doc_amenities: "设施资料",
+    doc_reviews: "顾客评论资料",
+    doc_old_blog: "过期博客资料",
+  },
+  en: {
+    doc_map: "Harvard area distance notes",
+    doc_hours: "Opening hours",
+    doc_amenities: "Amenities guide",
+    doc_reviews: "Customer reviews",
+    doc_old_blog: "Outdated blog post",
+  },
+};
+
+const DOC_PREVIEWS: Record<Lang, Record<string, string>> = {
+  zh: {
+    doc_map: "列出几家咖啡店到 Harvard Yard 的步行距离。",
+    doc_hours: "列出几家咖啡店周六晚上的关门时间。",
+    doc_amenities: "列出 Wi-Fi、安静座位和素食点心等条件。",
+    doc_reviews: "补充周六晚上的噪音、座位和适合办公程度。",
+    doc_old_blog: "包含旧营业时间，适合用来说明为什么要核对资料。",
+  },
+  en: {
+    doc_map: "Lists walking distances from several cafes to Harvard Yard.",
+    doc_hours: "Lists Saturday closing times for the candidate cafes.",
+    doc_amenities: "Lists Wi-Fi, quiet seating, and vegetarian snacks.",
+    doc_reviews: "Adds notes about noise, seating, and laptop suitability.",
+    doc_old_blog: "Contains old hours and shows why verification can matter.",
+  },
+};
+
+function docLabel(docId: string, lang: Lang): string {
+  return DOC_LABELS[lang][docId] ?? docId;
+}
+
+function docPreview(docId: string, lang: Lang): string | undefined {
+  return DOC_PREVIEWS[lang][docId];
+}
+
+function formatDocList(docIds: string[], lang: Lang): string {
+  if (docIds.length === 0) {
+    return lang === "zh" ? "【空】" : "[None]";
+  }
+  return docIds.map((docId) => docLabel(docId, lang)).join(lang === "zh" ? "、" : ", ");
+}
+
+function formatDocPreviewList(docIds: string[], lang: Lang): string {
+  const items = docIds
+    .map((docId) => {
+      const preview = docPreview(docId, lang);
+      if (lang === "zh") {
+        return preview ? `• ${docLabel(docId, lang)}：${preview}` : `• ${docLabel(docId, lang)}`;
+      }
+      return preview ? `• ${docLabel(docId, lang)}: ${preview}` : `• ${docLabel(docId, lang)}`;
+    })
+    .join("\n");
+  return items || (lang === "zh" ? "【空】" : "[None]");
+}
+
+function formatInlineOrBullets(label: string, value: string, lang: Lang): string {
+  const emptyValues = new Set(["【空】", "[None]"]);
+  if (emptyValues.has(value)) {
+    return `${label}${lang === "zh" ? "：" : ": "}${value}`;
+  }
+  const separator = lang === "zh" ? "、" : ", ";
+  const items = value.split(separator).filter(Boolean);
+  if (items.length <= 1) {
+    return `${label}${lang === "zh" ? "：" : ": "}${value}`;
+  }
+  return `${label}${lang === "zh" ? "：" : ":"}\n${items.map((item) => `  • ${item}`).join("\n")}`;
+}
+
+function describeExplanation(explanation: string, lang: Lang): string {
+  if (lang !== "zh") {
+    return explanation;
+  }
+  const translations: Record<string, string> = {
+    "Search for candidate evidence.": "先找可能有用的资料。",
+    "Read the top candidate document.": "打开最可能有用的一篇资料。",
+    "Keep a compact note so it stays visible in the context.": "把重点保存成短笔记，后面更容易继续使用。",
+    "Enough evidence gathered; answer from what we read.": "已经读到一些证据，可以根据资料回答。",
+    "No tools or memory to gather evidence, so just guess.": "现在还缺少查资料或记住资料的能力，所以只能猜。",
+  };
+  return translations[explanation] ?? explanation;
+}
+
+function describeObservation(step: TraceStep, lang: Lang): string {
+  if (lang !== "zh") {
+    return step.observation;
+  }
+  const { name } = step.action;
+  if (name === "search_corpus") {
+    const docIds = formatDocList(step.memory.pool, lang);
+    return `找到并放进临时笔记本的候选资料：${docIds}`;
+  }
+  if (name === "read_doc") {
+    return step.observation.replace(/^# (.+)\n/, (_, docId: string) => `打开的资料 ${docLabel(docId, lang)}：\n`);
+  }
+  if (name === "curate") {
+    return step.observation.replace(
+      /^Curated (.+?): /,
+      (_, docId: string) => `保存的重点（来自 ${docLabel(docId, lang)}）：`,
+    );
+  }
+  if (name === "verify") {
+    return step.observation.replace("Verification result", "核对结果");
+  }
+  return step.observation;
+}
+
+function describeStepIntent(step: TraceStep, lang: Lang): string {
+  const { name, args } = step.action;
+  const value = (key: string) => String(args[key] ?? "").trim();
+  if (lang === "zh") {
+    switch (name) {
+      case "search_corpus":
+        return `先去资料库里找可能支持这个问题的证据：“${value("query")}”。`;
+      case "read_doc":
+        return `打开最可能有用的一篇资料：${docLabel(value("doc_id"), lang)}。`;
+      case "curate":
+        return `把 ${docLabel(value("doc_id"), lang)} 里的关键信息保存成短笔记。`;
+      case "verify":
+        return `检查这个说法有没有被临时笔记本里的资料支持：“${value("claim")}”。`;
+      case "finish":
+        return "根据当前能看到的资料提交最终回答。";
+      default:
+        return describeExplanation(step.explanation, lang);
+    }
+  }
+  switch (name) {
+    case "search_corpus":
+      return `Search the document collection for evidence about “${value("query")}”.`;
+    case "read_doc":
+      return `Open the most useful candidate: ${docLabel(value("doc_id"), lang)}.`;
+    case "curate":
+      return `Save the key information from ${docLabel(value("doc_id"), lang)} as a short note.`;
+    case "verify":
+      return `Check whether the claim is supported: “${value("claim")}”.`;
+    case "finish":
+      return "Submit an answer using the material currently available.";
+    default:
+      return describeExplanation(step.explanation, lang);
+  }
+}
+
+function describeStepOutcome(step: TraceStep, lang: Lang): string {
+  const { name, args } = step.action;
+  const value = (key: string) => String(args[key] ?? "").trim();
+  if (name === "search_corpus") {
+    const count = step.memory.pool.length;
+    if (lang === "zh") {
+      return `找到了 ${count} 篇候选资料：\n${formatDocPreviewList(step.memory.pool, lang)}`;
+    }
+    return `Found ${count} candidate documents:\n${formatDocPreviewList(step.memory.pool, lang)}`;
+  }
+  if (name === "read_doc") {
+    const docId = value("doc_id");
+    const preview = docPreview(docId, lang);
+    if (lang === "zh") {
+      return `${docLabel(docId, lang)}已经打开。${preview ? `这篇资料的重点：${preview}` : describeObservation(step, lang)}`;
+    }
+    return `${docLabel(docId, lang)} was opened. ${preview ? `Main idea: ${preview}` : describeObservation(step, lang)}`;
+  }
+  if (name === "curate") {
+    const docId = value("doc_id");
+    const note = String(args.note ?? "").trim();
+    if (lang === "zh") {
+      return `已从 ${docLabel(docId, lang)} 保存一条短笔记：${note || "关键证据短笔记"}。`;
+    }
+    return `Saved a short note from ${docLabel(docId, lang)}: ${note || "Key evidence"}.`;
+  }
+  if (name === "verify") {
+    return describeObservation(step, lang);
+  }
+  if (name === "finish") {
+    if (lang === "zh") {
+      return `已经提交回答：${describeFinalAnswer(step.observation, lang)}`;
+    }
+    return `Submitted answer: ${describeFinalAnswer(step.observation, lang)}`;
+  }
+  return describeObservation(step, lang);
+}
+
+function describeNotebookState(step: TraceStep, lang: Lang): string {
+  const candidates = formatDocList(step.memory.pool, lang);
+  const storedDocs = step.memory.doc_store_ids.map((docId) => docLabel(docId, lang)).join(lang === "zh" ? "、" : ", ");
+  const notes = Object.entries(step.memory.curated);
+  if (lang === "zh") {
+    const sections = [formatInlineOrBullets("候选资料", candidates, lang)];
+    if (storedDocs) {
+      sections.push(formatInlineOrBullets("已读全文", storedDocs, lang));
+    }
+    if (notes.length > 0) {
+      const curated = notes.map(([docId]) => docLabel(docId, lang)).join("、");
+      sections.push(formatInlineOrBullets("保存的重点", curated, lang));
+    }
+    if (!storedDocs) {
+      sections.push("下一步：用“阅读”工具打开这些候选资料。");
+    } else if (notes.length === 0) {
+      sections.push("下一步：用“整理”工具把多份资料压成短笔记。");
+    }
+    return sections.join("\n");
+  }
+  const sections = [formatInlineOrBullets("Candidates", candidates, lang)];
+  if (storedDocs) {
+    sections.push(formatInlineOrBullets("Full docs read", storedDocs, lang));
+  }
+  if (notes.length > 0) {
+    const curated = notes.map(([docId]) => docLabel(docId, lang)).join(", ");
+    sections.push(formatInlineOrBullets("Curated notes", curated, lang));
+  }
+  if (!storedDocs) {
+    sections.push("Next: use the Read tool to open these candidates.");
+  } else if (notes.length === 0) {
+    sections.push("Next: use Curate to compress the sources into a short note.");
+  }
+  return sections.join("\n");
+}
+
+function describeStageLimitation(step: TraceStep, lang: Lang): string | undefined {
+  const hasCuratedNotes = Object.keys(step.memory.curated).length > 0;
+  if (lang === "zh") {
+    switch (step.action.name) {
+      case "search_corpus":
+        return "资料已经找到，但如果还没有“阅读”工具，模型还不能真正打开资料看内容。";
+      case "read_doc":
+        return step.step < 4
+          ? "这只是其中一份资料。这个问题有多个条件，还需要继续阅读营业时间和设施资料。"
+          : "关键资料已经读完。下一块常见能力是“整理”：把多份资料压缩成后面能反复使用的短笔记。";
+      case "curate":
+        return "重点已经保存，后面的回答就不必每次重新读整篇资料。";
+      case "finish":
+        return hasCuratedNotes
+          ? "这次回答已经带着整理过的重点。现在可以看评估结果，比较这个 harness 是否有效。"
+          : "这次回答没有经过“整理”步骤；这正好可以用来比较不同 harness 设计的效果。";
+      default:
+        return undefined;
+    }
+  }
+  switch (step.action.name) {
+    case "search_corpus":
+      return "Candidates are found, but without a Read tool the model cannot inspect the full source text yet.";
+    case "read_doc":
+      return step.step < 4
+        ? "This is only one source. The question has multiple constraints, so the harness still needs more sources."
+        : "The key sources are open. The next useful capability is Curate: compress multiple sources into a reusable note.";
+    case "curate":
+      return "The useful bit is saved, so later steps do not need to carry the whole document again.";
+    case "finish":
+      return hasCuratedNotes
+        ? "This answer used curated evidence. Check the evaluator to compare whether this harness worked."
+        : "This answer skipped curation, which is useful for comparing harness designs.";
+    default:
+      return undefined;
+  }
+}
+
+function describeRunNote(note: string, lang: Lang): string {
+  if (lang !== "zh") {
+    return note;
+  }
+  if (note.startsWith("No Working Memory block")) {
+    return "还没有临时笔记本：搜索到的资料不会稳定留到下一步。";
+  }
+  if (note.startsWith("No Context Builder block")) {
+    return "还没有上下文构建器：模型每一步实际看到的材料还不完整。";
+  }
+  if (note.startsWith("No Evaluator block")) {
+    return "还没有检查员：答案会生成，但暂时不会被打分。";
+  }
+  if (note.startsWith("No search_corpus tool")) {
+    return "还没有搜索资料工具。";
+  }
+  if (note.startsWith("No read_doc tool")) {
+    return "还没有阅读资料工具。";
+  }
+  if (note.startsWith("No curate tool")) {
+    return "还没有保存重点工具。";
+  }
+  if (note.startsWith("No finish tool")) {
+    return "还没有提交答案工具。";
+  }
+  return note;
+}
+
+function describeFinalAnswer(answer: string, lang: Lang): string {
+  if (lang === "zh" && answer === "I am not sure yet - I have nothing to look at.") {
+    return "暂时还没有足够资料回答。";
+  }
+  return answer;
+}
+
+function formatMemory(step: TraceStep, lang: Lang): string {
+  if (lang !== "zh") {
+    return JSON.stringify({ args: step.action.args, memory: step.memory }, null, 2);
+  }
+  const pool = step.memory.pool.length ? step.memory.pool.map((docId) => docLabel(docId, lang)).join("、") : "【空】";
+  const storedDocs = step.memory.doc_store_ids.length
+    ? step.memory.doc_store_ids.map((docId) => docLabel(docId, lang)).join("、")
+    : "【空】";
+  const notes = Object.entries(step.memory.curated);
+  const curated = notes.length
+    ? notes.map(([docId, note]) => `${docLabel(docId, lang)}: ${note}`).join("\n")
+    : "【空】";
+  return [
+    `临时笔记本里的候选资料：${pool}`,
+    `临时笔记本里已有全文的资料：${storedDocs}`,
+    `保存的重点：\n${curated}`,
+  ].join("\n\n");
+}
+
+function formatContext(context: string, lang: Lang): string {
+  if (lang !== "zh") {
+    return context || "(nothing)";
+  }
+  if (!context) {
+    return "这一轮还没有递给模型的内容。";
+  }
+  if (context.startsWith("(no context builder")) {
+    return "还没有上下文构建器：这一轮模型实际拿到的材料还不完整。";
+  }
+  return context
+    .replace(/^Task:/gm, "问题：")
+    .replace(/^Metric:/gm, "检查标准：")
+    .replace(/^Candidate pool:/gm, "临时笔记本里的候选资料：")
+    .replace(/^Curated evidence:/gm, "保存的重点：")
+    .replace(/^History:/gm, "前面几步做过的事：")
+    .replace(/\(empty\)/g, "【空】");
+}
+
+export function OutputPanel({ runResult, generatedCode, isRunning, error, lang }: OutputPanelProps) {
+  const labels =
+    lang === "zh"
+      ? {
+          trace: "运行过程",
+          running: "正在运行这个 harness...",
+          success: "成功",
+          needsWork: "需要改进",
+          notScored: "未评分",
+          score: "分数",
+          steps: "步",
+          summaryPrefix: "这个工作流运行了",
+          turns: "轮，保留了",
+          notes: "条重点笔记。递给模型的文字长度：",
+          chars: "字符。",
+          finalAnswer: "最终回答",
+          modelSaw: "这一轮模型实际看到的内容",
+          raw: "查看临时笔记本",
+          empty: "点击运行当前图。",
+          code: "生成的 Python",
+          codeEmpty: "点击“生成代码”查看这个积木设计对应的小型 Python harness。",
+          step: "第",
+          stepSuffix: " 步",
+          intent: "这一步想做什么",
+          outcome: "发生了什么",
+          notebook: "临时笔记本现在记住了",
+          limitation: "现在的限制",
+          errorLabel: "错误",
+          warningLabel: "提示",
+        }
+      : {
+          trace: "Run Trace",
+          running: "Running the harness...",
+          success: "Success",
+          needsWork: "Needs work",
+          notScored: "Not scored",
+          score: "Score",
+          steps: "steps",
+          summaryPrefix: "The harness took",
+          turns: "turns and kept",
+          notes: "notes. Context size:",
+          chars: "characters.",
+          finalAnswer: "Final answer",
+          modelSaw: "What the model saw this step",
+          raw: "Show raw details",
+          empty: "Click Run to execute the current graph.",
+          code: "Generated Python",
+          codeEmpty: "Click Generate Code to preview a small Python harness.",
+          step: "Step",
+          stepSuffix: "",
+          intent: "Goal for this step",
+          outcome: "What happened",
+          notebook: "Temporary notebook now",
+          limitation: "Current limitation",
+          errorLabel: "error",
+          warningLabel: "warning",
+        };
+  return (
+    <section className="output">
+      <div className="output-column">
+        <h2>{labels.trace}</h2>
+        {isRunning && <p className="muted">{labels.running}</p>}
+        {error && <p className="error">{error}</p>}
+        {runResult ? (
+          <>
+            <div className="metrics run-result-summary">
+              {runResult.metrics.scored ? (
+                <>
+                  <span className={`metric-result ${runResult.metrics.success ? "ok" : "warn"}`}>
+                    {runResult.metrics.success ? labels.success : labels.needsWork}
+                  </span>
+                  <span>{labels.score} {runResult.metrics.score.toFixed(2)} / 1.00</span>
+                </>
+              ) : (
+                <span className="metric-result neutral">{labels.notScored}</span>
+              )}
+              <span>{runResult.metrics.steps} {labels.steps}</span>
+            </div>
+            <p className="metrics-note">
+              {labels.summaryPrefix} {runResult.metrics.steps} {labels.turns}{" "}
+              {runResult.metrics.curated_docs} {labels.notes}{" "}
+              {runResult.metrics.context_chars.toLocaleString()} {labels.chars}
+            </p>
+
+            {runResult.notes.length > 0 && (
+              <div className="run-notes">
+                {runResult.notes.map((note, index) => (
+                  <p key={`${note}-${index}`} className="run-note">
+                    {describeRunNote(note, lang)}
+                  </p>
+                ))}
+              </div>
+            )}
+
+            {runResult.issues.length > 0 && (
+              <div className="issues">
+                {runResult.issues.map((issue, index) => (
+                  <p key={`${issue.message}-${index}`} className={issue.level}>
+                    {(issue.level === "error" ? labels.errorLabel : labels.warningLabel)}: {issue.message}
+                  </p>
+                ))}
+              </div>
+            )}
+
+            <div className="trace-list run-result-trace">
+              {runResult.trace.map((step) => (
+                <article className="trace-card" data-trace-step={step.step} key={step.step}>
+                  <header>
+                    <strong>
+                      {labels.step} {step.step}{lang === "zh" ? labels.stepSuffix : ""}
+                    </strong>
+                    <span className={`action-badge ${actionToneClass(step.action.name)}`}>
+                      {actionLabel(step.action.name, lang)}
+                    </span>
+                  </header>
+                  <div className="trace-teaching-grid">
+                    <div className="trace-teaching-item" data-trace-section="intent">
+                      <span className="trace-teaching-label">{labels.intent}</span>
+                      <p>{describeStepIntent(step, lang)}</p>
+                    </div>
+                    <div className="trace-teaching-item" data-trace-section="outcome">
+                      <span className="trace-teaching-label">{labels.outcome}</span>
+                      <p>{describeStepOutcome(step, lang)}</p>
+                    </div>
+                    <div className="trace-teaching-item" data-trace-section="notebook">
+                      <span className="trace-teaching-label">{labels.notebook}</span>
+                      <p>{describeNotebookState(step, lang)}</p>
+                    </div>
+                    {describeStageLimitation(step, lang) ? (
+                      <div className="trace-teaching-item trace-limitation" data-trace-section="limitation">
+                        <span className="trace-teaching-label">{labels.limitation}</span>
+                        <p>{describeStageLimitation(step, lang)}</p>
+                      </div>
+                    ) : null}
+                  </div>
+                  <details className="trace-context" data-trace-section="model-context">
+                    <summary>{labels.modelSaw}</summary>
+                    <pre>{formatContext(step.context, lang)}</pre>
+                  </details>
+                  <details className="trace-details">
+                    <summary>{labels.raw}</summary>
+                    <pre>{formatMemory(step, lang)}</pre>
+                  </details>
+                </article>
+              ))}
+            </div>
+
+            {runResult.final_answer && (
+              <div className="final-answer run-result-final">
+                <span className="final-answer-label">{labels.finalAnswer}</span>
+                <p>{describeFinalAnswer(runResult.final_answer, lang)}</p>
+              </div>
+            )}
+          </>
+        ) : (
+          !isRunning && <p className="muted">{labels.empty}</p>
+        )}
+      </div>
+      <div className="output-column">
+        <h2>{labels.code}</h2>
+        {generatedCode ? (
+          <pre className="code-preview">{generatedCode}</pre>
+        ) : (
+          <p className="muted">{labels.codeEmpty}</p>
+        )}
+      </div>
+    </section>
+  );
+}
