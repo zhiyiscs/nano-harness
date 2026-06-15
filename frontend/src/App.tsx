@@ -101,7 +101,7 @@ function getTourSteps(lang: Lang): TourStep[] {
   return [
     {
       title: "欢迎来到 Nano Harness",
-      body: "你可以把模型想成一个聪明但健忘的实习生。我们慢慢给它配任务、工具、笔记本，最后再找人验收。",
+      body: "你可以把模型想成一个聪明但健忘的实习生。我们慢慢给它配任务、工具、工作记忆，最后再找人验收。",
       placement: "center",
     },
     {

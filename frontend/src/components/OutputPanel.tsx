@@ -119,6 +119,11 @@ function describeExplanation(explanation: string, lang: Lang): string {
     "Keep a compact note so it stays visible in the context.": "把重点保存成短笔记，后面更容易继续使用。",
     "Enough evidence gathered; answer from what we read.": "已经读到一些证据，可以根据资料回答。",
     "No tools or memory to gather evidence, so just guess.": "现在还缺少查资料或记住资料的能力，所以只能猜。",
+    "Read the next source needed to check the constraints.": "打开下一篇资料，用来检查题目里的约束。",
+    "Keep the cross-document evidence as a compact note.": "把跨文档证据保存成一条紧凑笔记。",
+    "Check the recommendation against the gathered evidence.": "用已经收集到的证据核对推荐是否成立。",
+    "Enough evidence gathered; answer from the curated note.": "证据已经足够；根据整理过的短笔记回答。",
+    "Some evidence was read, but the harness has not curated it yet.": "已经读到一些证据，但 harness 还没有把它整理成短笔记。",
   };
   return translations[explanation] ?? explanation;
 }
@@ -130,7 +135,7 @@ function describeObservation(step: TraceStep, lang: Lang): string {
   const { name } = step.action;
   if (name === "search_corpus") {
     const docIds = formatDocList(step.memory.pool, lang);
-    return `找到并放进临时笔记本的候选资料：${docIds}`;
+    return `找到并写入工作记忆的候选资料：${docIds}`;
   }
   if (name === "read_doc") {
     return step.observation.replace(/^# (.+)\n/, (_, docId: string) => `打开的资料 ${docLabel(docId, lang)}：\n`);
@@ -159,7 +164,7 @@ function describeStepIntent(step: TraceStep, lang: Lang): string {
       case "curate":
         return `把 ${docLabel(value("doc_id"), lang)} 里的关键信息保存成短笔记。`;
       case "verify":
-        return `检查这个说法有没有被临时笔记本里的资料支持：“${value("claim")}”。`;
+        return `检查这个说法有没有被工作记忆里的资料支持：“${value("claim")}”。`;
       case "finish":
         return "根据当前能看到的资料提交最终回答。";
       default:
@@ -299,7 +304,7 @@ function describeRunNote(note: string, lang: Lang): string {
     return note;
   }
   if (note.startsWith("No Working Memory block")) {
-    return "还没有临时笔记本：搜索到的资料不会稳定留到下一步。";
+    return "还没有工作记忆：搜索到的资料不会稳定留到下一步。";
   }
   if (note.startsWith("No Context Builder block")) {
     return "还没有上下文构建器：模型每一步实际看到的材料还不完整。";
@@ -342,8 +347,9 @@ function formatMemory(step: TraceStep, lang: Lang): string {
     ? notes.map(([docId, note]) => `${docLabel(docId, lang)}: ${note}`).join("\n")
     : "【空】";
   return [
-    `临时笔记本里的候选资料：${pool}`,
-    `临时笔记本里已有全文的资料：${storedDocs}`,
+    "说明：这里是 harness 暂存的 Working Memory，也就是工作记忆。它是步骤之间保存状态的地方，不等于模型输入；模型这一轮只看到“这一轮模型实际看到的内容”里列出的 prompt。",
+    `工作记忆里的候选资料：${pool}`,
+    `工作记忆里已有全文的资料：${storedDocs}`,
     `保存的重点：\n${curated}`,
   ].join("\n\n");
 }
@@ -361,13 +367,18 @@ function formatContext(context: string, lang: Lang): string {
   return context
     .replace(/^Task:/gm, "问题：")
     .replace(/^Metric:/gm, "检查标准：")
-    .replace(/^Candidate pool:/gm, "临时笔记本里的候选资料：")
+    .replace(/^Candidate pool:/gm, "从工作记忆放入 prompt 的候选资料：")
     .replace(/^Curated evidence:/gm, "保存的重点：")
     .replace(/^History:/gm, "前面几步做过的事：")
     .replace(/\(empty\)/g, "【空】");
 }
 
+function isExpectedBuildUpIssue(message: string): boolean {
+  return /^Missing required .+ block\.$/.test(message) || /^Missing enabled tool block: .+\.$/.test(message);
+}
+
 export function OutputPanel({ runResult, generatedCode, isRunning, error, lang }: OutputPanelProps) {
+  const visibleIssues = runResult?.issues.filter((issue) => !isExpectedBuildUpIssue(issue.message)) ?? [];
   const labels =
     lang === "zh"
       ? {
@@ -383,8 +394,8 @@ export function OutputPanel({ runResult, generatedCode, isRunning, error, lang }
           notes: "条重点笔记。递给模型的文字长度：",
           chars: "字符。",
           finalAnswer: "最终回答",
-          modelSaw: "这一轮模型实际看到的内容",
-          raw: "查看临时笔记本",
+          modelSaw: "这一轮真正发给模型的 prompt",
+          raw: "查看工作记忆（不等于模型输入）",
           empty: "点击运行当前图。",
           code: "生成的 Python",
           codeEmpty: "点击“生成代码”查看这个积木设计对应的小型 Python harness。",
@@ -392,7 +403,7 @@ export function OutputPanel({ runResult, generatedCode, isRunning, error, lang }
           stepSuffix: " 步",
           intent: "这一步想做什么",
           outcome: "发生了什么",
-          notebook: "临时笔记本现在记住了",
+          notebook: "工作记忆现在保存了",
           limitation: "现在的限制",
           errorLabel: "错误",
           warningLabel: "提示",
@@ -411,7 +422,7 @@ export function OutputPanel({ runResult, generatedCode, isRunning, error, lang }
           chars: "characters.",
           finalAnswer: "Final answer",
           modelSaw: "What the model saw this step",
-          raw: "Show raw details",
+          raw: "Show Working Memory",
           empty: "Click Run to execute the current graph.",
           code: "Generated Python",
           codeEmpty: "Click Generate Code to preview a small Python harness.",
@@ -461,9 +472,9 @@ export function OutputPanel({ runResult, generatedCode, isRunning, error, lang }
               </div>
             )}
 
-            {runResult.issues.length > 0 && (
+            {visibleIssues.length > 0 && (
               <div className="issues">
-                {runResult.issues.map((issue, index) => (
+                {visibleIssues.map((issue, index) => (
                   <p key={`${issue.message}-${index}`} className={issue.level}>
                     {(issue.level === "error" ? labels.errorLabel : labels.warningLabel)}: {issue.message}
                   </p>
