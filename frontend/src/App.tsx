@@ -42,11 +42,13 @@ const nodeTypes = {
 
 const TOUR_STORAGE_KEY = "nano-harness:tour-completed";
 const AUTO_RUN_TUTORIAL_STAGE_IDS = new Set([
+  "baseline",
   "search",
   "memory",
   "read",
   "context",
   "curate",
+  "verify",
   "evaluator",
   "complete",
   "iterate",
@@ -189,7 +191,7 @@ function labelForNode(type: GraphNode["type"], currentLabel: string, config: Rec
   }
   if (type === "model_policy") {
     const policyKind = String(config.policy_kind ?? "");
-    return policyKind === "scripted" ? "Scripted Policy" : "Model Policy";
+    return policyKind === "scripted" ? "Scripted Decision Maker" : "Model / Decision Maker";
   }
   if (type === "context_builder") {
     return "Context Builder";
@@ -308,7 +310,7 @@ function missingParts(nodes: FlowNode[], lang: Lang): string[] {
       .map((node) => String(node.data.config.tool_name ?? "")),
   );
   const missing: string[] = [];
-  if (!nodeTypes.has("model_policy")) missing.push(lang === "zh" ? "决策者" : "Policy");
+  if (!nodeTypes.has("model_policy")) missing.push(lang === "zh" ? "决策者" : "Decision Maker");
   if (!nodeTypes.has("memory")) missing.push(lang === "zh" ? "记忆" : "Memory");
   if (!nodeTypes.has("context_builder")) missing.push(lang === "zh" ? "上下文" : "Context");
   if (!nodeTypes.has("evaluator")) missing.push(lang === "zh" ? "评分员" : "Evaluator");
@@ -375,7 +377,7 @@ export default function App() {
           }
         : {
             subtitle:
-              "A beginner lesson: same fixed model, different harness (search, memory, context, evaluation) = different results. Build one from scratch to see why. Just a simulation, no API key needed.",
+              "A beginner lesson: same fixed model, different harness (search, memory, context, evaluation) = different results. Assemble one step by step to see why. Just a simulation, no API key needed.",
             loadExample: "Load full example",
             run: "Run",
             autoArrange: "Auto arrange",

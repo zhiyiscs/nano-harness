@@ -187,6 +187,28 @@ function describeStepIntent(step: TraceStep, lang: Lang): string {
   }
 }
 
+function describeModelInputSummary(context: string, lang: Lang): string {
+  if (!context) {
+    return lang === "zh" ? "这一轮还没有递给模型的内容。" : "Nothing was sent to the model this step.";
+  }
+  if (context.startsWith("(no context builder")) {
+    return lang === "zh"
+      ? "还没有上下文构建器；模型没有拿到由工作记忆整理出的 prompt。"
+      : "No Context Builder yet; the model did not receive a prompt assembled from memory.";
+  }
+  const sections: string[] = [];
+  if (context.includes("Task:")) sections.push(lang === "zh" ? "任务问题" : "task");
+  if (context.includes("Candidate pool:")) sections.push(lang === "zh" ? "候选资料" : "candidate pool");
+  if (context.includes("Curated evidence:")) sections.push(lang === "zh" ? "整理后的证据" : "curated evidence");
+  if (context.includes("History:")) sections.push(lang === "zh" ? "历史步骤" : "recent history");
+  if (sections.length === 0) {
+    return lang === "zh" ? "上下文构建器递给模型一段 prompt。" : "The Context Builder sent a prompt to the model.";
+  }
+  return lang === "zh"
+    ? `这一轮递给模型的那页纸包含：${sections.join("、")}。`
+    : `The page sent to the model included: ${sections.join(", ")}.`;
+}
+
 function describeStepOutcome(step: TraceStep, lang: Lang): string {
   const { name, args } = step.action;
   const value = (key: string) => String(args[key] ?? "").trim();
@@ -223,6 +245,15 @@ function describeStepOutcome(step: TraceStep, lang: Lang): string {
     return `Submitted answer: ${describeFinalAnswer(step.observation, lang)}`;
   }
   return describeObservation(step, lang);
+}
+
+function describeModelChoice(step: TraceStep, lang: Lang): string {
+  const intent = describeStepIntent(step, lang);
+  const outcome = describeStepOutcome(step, lang);
+  if (lang === "zh") {
+    return `${intent}\n结果：${outcome}`;
+  }
+  return `${intent}\nResult: ${outcome}`;
 }
 
 function describeNotebookState(step: TraceStep, lang: Lang): string {
@@ -331,7 +362,35 @@ function describeFinalAnswer(answer: string, lang: Lang): string {
   if (lang === "zh" && answer === "I am not sure yet - I have nothing to look at.") {
     return "暂时还没有足够资料回答。";
   }
+  if (
+    lang === "zh" &&
+    answer ===
+      "Crimson Brew Cafe might be the answer, but I have no sources yet to prove the distance, hours, Wi-Fi, or vegetarian snacks."
+  ) {
+    return "Crimson Brew Cafe 可能是答案，但现在还没有来源能证明距离、营业时间、Wi-Fi 或素食点心。";
+  }
   return answer;
+}
+
+function constraintLabel(label: string, lang: Lang): string {
+  if (lang !== "zh") {
+    return label;
+  }
+  const labels: Record<string, string> = {
+    "near Harvard Yard": "Harvard Yard 附近",
+    "within 10 minute walk": "步行 10 分钟内",
+    "open after 21:00 on Saturday": "周六 21:00 后营业",
+    "has Wi-Fi": "有 Wi-Fi",
+    "has vegetarian snacks": "有素食点心",
+  };
+  return labels[label] ?? label;
+}
+
+function constraintSource(source: string | undefined, lang: Lang): string {
+  if (!source) {
+    return lang === "zh" ? "缺少证据" : "missing evidence";
+  }
+  return docLabel(source, lang);
 }
 
 function formatMemory(step: TraceStep, lang: Lang): string {
@@ -393,6 +452,11 @@ export function OutputPanel({ runResult, generatedCode, isRunning, error, lang }
           turns: "轮，保留了",
           notes: "条重点笔记。递给模型的文字长度：",
           chars: "字符。",
+          checklist: "约束清单",
+          pass: "通过",
+          fail: "未通过",
+          evidence: "证据",
+          source: "来源",
           finalAnswer: "最终回答",
           modelSaw: "这一轮真正发给模型的 prompt",
           raw: "查看工作记忆（不等于模型输入）",
@@ -401,9 +465,9 @@ export function OutputPanel({ runResult, generatedCode, isRunning, error, lang }
           codeEmpty: "点击“生成代码”查看这个积木设计对应的小型 Python harness。",
           step: "第",
           stepSuffix: " 步",
-          intent: "这一步想做什么",
-          outcome: "发生了什么",
-          notebook: "工作记忆现在保存了",
+          modelChose: "模型因此选择了什么",
+          sentToModel: "模型实际看见什么",
+          stored: "系统存了什么",
           limitation: "现在的限制",
           errorLabel: "错误",
           warningLabel: "提示",
@@ -420,6 +484,11 @@ export function OutputPanel({ runResult, generatedCode, isRunning, error, lang }
           turns: "turns and kept",
           notes: "notes. Context size:",
           chars: "characters.",
+          checklist: "Constraint checklist",
+          pass: "Pass",
+          fail: "Fail",
+          evidence: "Evidence",
+          source: "Source",
           finalAnswer: "Final answer",
           modelSaw: "What the model saw this step",
           raw: "Show Working Memory",
@@ -428,9 +497,9 @@ export function OutputPanel({ runResult, generatedCode, isRunning, error, lang }
           codeEmpty: "Click Generate Code to preview a small Python harness.",
           step: "Step",
           stepSuffix: "",
-          intent: "Goal for this step",
-          outcome: "What happened",
-          notebook: "Temporary notebook now",
+          modelChose: "Model chose",
+          sentToModel: "Sent to model",
+          stored: "Stored in memory",
           limitation: "Current limitation",
           errorLabel: "error",
           warningLabel: "warning",
@@ -461,6 +530,28 @@ export function OutputPanel({ runResult, generatedCode, isRunning, error, lang }
               {runResult.metrics.curated_docs} {labels.notes}{" "}
               {runResult.metrics.context_chars.toLocaleString()} {labels.chars}
             </p>
+
+            {runResult.metrics.constraints && runResult.metrics.constraints.length > 0 && (
+              <div className="run-notes" data-trace-section="checklist">
+                <p className="run-note">
+                  <strong>{labels.checklist}</strong>
+                </p>
+                {runResult.metrics.constraints.map((constraint) => (
+                  <p className="run-note" key={constraint.id}>
+                    <strong>{constraint.passed ? labels.pass : labels.fail}</strong>{" "}
+                    {constraintLabel(constraint.label, lang)}
+                    <br />
+                    {labels.source}: {constraintSource(constraint.source, lang)}
+                    {constraint.evidence ? (
+                      <>
+                        <br />
+                        {labels.evidence}: {constraint.evidence}
+                      </>
+                    ) : null}
+                  </p>
+                ))}
+              </div>
+            )}
 
             {runResult.notes.length > 0 && (
               <div className="run-notes">
@@ -494,17 +585,17 @@ export function OutputPanel({ runResult, generatedCode, isRunning, error, lang }
                     </span>
                   </header>
                   <div className="trace-teaching-grid">
-                    <div className="trace-teaching-item" data-trace-section="intent">
-                      <span className="trace-teaching-label">{labels.intent}</span>
-                      <p>{describeStepIntent(step, lang)}</p>
+                    <div className="trace-teaching-item" data-trace-section="notebook">
+                      <span className="trace-teaching-label">{labels.stored}</span>
+                      <p>{describeNotebookState(step, lang)}</p>
+                    </div>
+                    <div className="trace-teaching-item" data-trace-section="model-context-summary">
+                      <span className="trace-teaching-label">{labels.sentToModel}</span>
+                      <p>{describeModelInputSummary(step.context, lang)}</p>
                     </div>
                     <div className="trace-teaching-item" data-trace-section="outcome">
-                      <span className="trace-teaching-label">{labels.outcome}</span>
-                      <p>{describeStepOutcome(step, lang)}</p>
-                    </div>
-                    <div className="trace-teaching-item" data-trace-section="notebook">
-                      <span className="trace-teaching-label">{labels.notebook}</span>
-                      <p>{describeNotebookState(step, lang)}</p>
+                      <span className="trace-teaching-label">{labels.modelChose}</span>
+                      <p>{describeModelChoice(step, lang)}</p>
                     </div>
                     {describeStageLimitation(step, lang) ? (
                       <div className="trace-teaching-item trace-limitation" data-trace-section="limitation">

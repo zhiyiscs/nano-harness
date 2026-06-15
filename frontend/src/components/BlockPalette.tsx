@@ -30,7 +30,7 @@ const CORE_BLOCKS_BY_LANG: Record<Lang, BlockDefinition[]> = {
   },
   {
     type: "model_policy",
-    label: "Model Policy",
+    label: "Model / Decision Maker",
     description: "决策者：看当前情况，决定下一步该做什么。Mock 是教学用固定脚本，不是真实大模型。",
     defaults: {
       policy_kind: "mock",
@@ -59,8 +59,8 @@ const CORE_BLOCKS_BY_LANG: Record<Lang, BlockDefinition[]> = {
   {
     type: "evaluator",
     label: "Evaluator",
-    description: "评分员：检查结果好不好，给这次运行打分。",
-    defaults: { primary_metric: "contains_expected_answer", track_costs: true },
+    description: "评分员：用约束清单检查最终结果。",
+    defaults: { primary_metric: "constraint_checklist", track_costs: true },
   },
   ],
   en: [
@@ -77,7 +77,7 @@ const CORE_BLOCKS_BY_LANG: Record<Lang, BlockDefinition[]> = {
     },
     {
       type: "model_policy",
-      label: "Model Policy",
+      label: "Model / Decision Maker",
       description: "Decision maker: chooses the next step. Mock is a teaching script, not a real model.",
       defaults: {
         policy_kind: "mock",
@@ -106,8 +106,8 @@ const CORE_BLOCKS_BY_LANG: Record<Lang, BlockDefinition[]> = {
     {
       type: "evaluator",
       label: "Evaluator",
-      description: "Grader: checks whether the final result is good.",
-      defaults: { primary_metric: "contains_expected_answer", track_costs: true },
+      description: "Grader: checks the final result against a constraint checklist.",
+      defaults: { primary_metric: "constraint_checklist", track_costs: true },
     },
   ],
 };
@@ -123,8 +123,8 @@ const TOOL_BLOCKS_BY_LANG: Record<Lang, BlockDefinition[]> = {
   {
     type: "tool",
     label: "Read Tool",
-    description: "工具：打开并读取一篇完整资料。",
-    defaults: toolDefaults("read_doc", "Read a full document."),
+    description: "工具：用工作记忆里的文档 id 打开资料。",
+    defaults: toolDefaults("read_doc", "Open a document using an id stored in memory."),
   },
   {
     type: "tool",
@@ -155,8 +155,8 @@ const TOOL_BLOCKS_BY_LANG: Record<Lang, BlockDefinition[]> = {
     {
       type: "tool",
       label: "Read Tool",
-      description: "Tool: open and read a full document.",
-      defaults: toolDefaults("read_doc", "Read a full document."),
+      description: "Tool: open a document using an id stored in memory.",
+      defaults: toolDefaults("read_doc", "Open a document using an id stored in memory."),
     },
     {
       type: "tool",

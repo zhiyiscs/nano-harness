@@ -59,6 +59,14 @@ export interface TraceStep {
   explanation: string;
 }
 
+export interface ConstraintResult {
+  id: string;
+  label: string;
+  passed: boolean;
+  evidence?: string;
+  source?: string;
+}
+
 export interface RunResponse {
   graph_name: string;
   issues: ValidationIssue[];
@@ -69,6 +77,8 @@ export interface RunResponse {
     score: number;
     success: boolean;
     scored: boolean;
+    primary_metric?: string;
+    constraints?: ConstraintResult[];
     steps: number;
     tool_calls: number;
     context_chars: number;

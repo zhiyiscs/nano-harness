@@ -44,6 +44,7 @@ const FIELD_DEFINITIONS: Record<string, FieldDefinition> = {
     help: "How this toy run should be scored.",
     kind: "select",
     options: [
+      { value: "constraint_checklist", label: "Constraint checklist" },
       { value: "contains_expected_answer", label: "Contains expected answer" },
       { value: "exact_match", label: "Exact match" },
       { value: "label_match", label: "Label match" },
@@ -61,8 +62,8 @@ const FIELD_DEFINITIONS: Record<string, FieldDefinition> = {
   },
   policy_kind: {
     key: "policy_kind",
-    label: "Policy Kind",
-    help: "决策者类型。Mock = 教学用固定脚本，方便观察 AI 工作流每一步，不是真实大模型。",
+    label: "Decision Maker Kind",
+    help: "技术上这个组件叫 policy：负责选择下一步动作。Mock = 教学用固定脚本，方便观察 AI 工作流每一步，不是真实大模型。",
     kind: "select",
     options: [
       { value: "mock", label: "Mock policy" },
@@ -154,6 +155,7 @@ const FIELD_DEFINITIONS: Record<string, FieldDefinition> = {
     help: "The main metric shown after a run.",
     kind: "select",
     options: [
+      { value: "constraint_checklist", label: "Constraint checklist" },
       { value: "contains_expected_answer", label: "Contains expected answer" },
       { value: "label_match", label: "Label match" },
       { value: "exact_match", label: "Exact match" },
@@ -199,7 +201,7 @@ function blockSummary(node: GraphNode): string {
     case "task":
       return "Define the input and what success means.";
     case "model_policy":
-      return "Decide which action the harness should take next.";
+      return "Choose the next action. Technically, this component is the policy.";
     case "memory":
       return "Control what state is kept between tool calls.";
     case "tool":
@@ -218,7 +220,9 @@ function previewLabel(node: GraphNode, config: Record<string, unknown>): string 
     return TOOL_LABELS[String(config.tool_name ?? "")] ?? node.label;
   }
   if (node.type === "model_policy") {
-    return String(config.policy_kind ?? "") === "scripted" ? "Scripted Policy" : "Model Policy";
+    return String(config.policy_kind ?? "") === "scripted"
+      ? "Scripted Decision Maker"
+      : "Model / Decision Maker";
   }
   return node.label;
 }

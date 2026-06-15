@@ -10,7 +10,7 @@ type HarnessNodeData = {
 
 const TYPE_LABELS: Record<GraphNode["type"], string> = {
   task: "Task",
-  model_policy: "Policy",
+  model_policy: "Decision",
   memory: "Memory",
   tool: "Tool",
   context_builder: "Context",

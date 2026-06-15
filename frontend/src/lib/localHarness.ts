@@ -1,5 +1,6 @@
 import type {
   CodegenResponse,
+  ConstraintResult,
   GraphNode,
   HarnessGraph,
   RunResponse,
@@ -63,7 +64,7 @@ const TOOL_LABELS: Record<ToolName, string> = {
 
 const TOOL_DESCRIPTIONS: Record<ToolName, string> = {
   search_corpus: "Find candidate documents.",
-  read_doc: "Inspect a full document from memory.",
+  read_doc: "Open a document using an id stored in memory.",
   curate: "Keep compact evidence in context.",
   verify: "Check a claim against memory.",
   finish: "Return the final answer.",
@@ -156,12 +157,12 @@ function retrievalQaTemplate(): HarnessGraph {
       {
         id: "policy",
         type: "model_policy",
-        label: "Model Policy",
+        label: "Model / Decision Maker",
         position: { x: 540, y: 250 },
         config: {
           policy_kind: "mock",
           max_steps: 7,
-          explanation: "A deterministic teaching policy checks distance, hours, amenities, then answers.",
+          explanation: "Technically, this is the policy: the part that chooses the next action.",
         },
       },
       ...(["search_corpus", "read_doc", "curate", "verify", "finish"] as ToolName[]).map(toolNode),
@@ -170,7 +171,7 @@ function retrievalQaTemplate(): HarnessGraph {
         type: "evaluator",
         label: "Evaluator",
         position: { x: 1030, y: 250 },
-        config: { primary_metric: "contains_expected_answer", track_costs: true },
+        config: { primary_metric: "constraint_checklist", track_costs: true },
       },
     ],
     edges: [
@@ -438,7 +439,13 @@ function chooseAction(task: TaskConfig, memory: WorkingMemory, step: number, ena
   }
 
   return [
-    { name: "finish", args: { answer: "I am not sure yet - I have nothing to look at." } },
+    {
+      name: "finish",
+      args: {
+        answer:
+          "Crimson Brew Cafe might be the answer, but I have no sources yet to prove the distance, hours, Wi-Fi, or vegetarian snacks.",
+      },
+    },
     "No tools or memory to gather evidence, so just guess.",
   ];
 }
@@ -491,18 +498,81 @@ function runTool(action: Action, memory: WorkingMemory): string {
   return `Tool '${action.name}' is not on the canvas yet.`;
 }
 
-function scoreAnswer(task: TaskConfig, answer: string): [number, boolean] {
+const CHECKLIST_DEFINITIONS = [
+  {
+    id: "near_harvard_yard",
+    label: "near Harvard Yard",
+    source: "doc_map",
+    terms: ["harvard yard", "crimson brew cafe"],
+  },
+  {
+    id: "within_10_min",
+    label: "within 10 minute walk",
+    source: "doc_map",
+    terms: ["6 minute", "crimson brew cafe"],
+  },
+  {
+    id: "open_after_21",
+    label: "open after 21:00 on Saturday",
+    source: "doc_hours",
+    terms: ["22:30", "saturday", "crimson brew cafe"],
+  },
+  {
+    id: "wifi",
+    label: "has Wi-Fi",
+    source: "doc_amenities",
+    terms: ["wi-fi", "crimson brew cafe"],
+  },
+  {
+    id: "vegetarian_snacks",
+    label: "has vegetarian snacks",
+    source: "doc_amenities",
+    terms: ["vegetarian", "crimson brew cafe"],
+  },
+] as const;
+
+function firstEvidenceSentence(text: string, terms: readonly string[]): string | undefined {
+  const sentences = text.split(/(?<=[.!?])\s+/);
+  return sentences.find((sentence) => terms.every((term) => sentence.toLowerCase().includes(term)));
+}
+
+function scoreConstraints(answer: string, memory: WorkingMemory): ConstraintResult[] {
+  const answerLower = answer.toLowerCase();
+  return CHECKLIST_DEFINITIONS.map((constraint) => {
+    const sourceText = memory.docStore[constraint.source] ?? "";
+    const sourceLower = sourceText.toLowerCase();
+    const evidence = firstEvidenceSentence(sourceText, constraint.terms);
+    const hasEvidence = constraint.terms.every((term) => sourceLower.includes(term));
+    const answerMentionsCafe = answerLower.includes("crimson brew");
+    return {
+      id: constraint.id,
+      label: constraint.label,
+      passed: hasEvidence && answerMentionsCafe,
+      evidence,
+      source: hasEvidence ? constraint.source : undefined,
+    };
+  });
+}
+
+function scoreAnswer(task: TaskConfig, answer: string, memory?: WorkingMemory): [number, boolean, ConstraintResult[] | undefined] {
+  if (task.success_metric === "constraint_checklist" && memory) {
+    const constraints = scoreConstraints(answer, memory);
+    const passed = constraints.filter((constraint) => constraint.passed).length;
+    const score = constraints.length > 0 ? passed / constraints.length : 0;
+    return [score, score === 1, constraints];
+  }
+
   const expectedTerms = task.expected_answer
     .split(/\s+/)
     .map((term) => term.replace(/[.,?!]/g, "").toLowerCase())
     .filter((term) => term.length > 3);
   if (expectedTerms.length === 0) {
-    return [0, false];
+    return [0, false, undefined];
   }
   const answerLower = answer.toLowerCase();
   const matched = expectedTerms.filter((term) => answerLower.includes(term)).length;
   const score = matched / expectedTerms.length;
-  return [score, score >= 0.45];
+  return [score, score >= 0.45, undefined];
 }
 
 export function runLocalGraph(graph: HarnessGraph): RunResponse {
@@ -565,7 +635,10 @@ export function runLocalGraph(graph: HarnessGraph): RunResponse {
     }
   }
 
-  const [score, success] = hasEvaluator ? scoreAnswer(task, finalAnswer) : [0, false];
+  const unscored: [number, boolean, ConstraintResult[] | undefined] = [0, false, undefined];
+  const [score, success, constraints] = hasEvaluator
+    ? scoreAnswer({ ...task, success_metric: "constraint_checklist" }, finalAnswer, memory)
+    : unscored;
   return {
     graph_name: graph.name,
     issues,
@@ -576,6 +649,8 @@ export function runLocalGraph(graph: HarnessGraph): RunResponse {
       score,
       success,
       scored: hasEvaluator,
+      primary_metric: hasEvaluator ? "constraint_checklist" : task.success_metric,
+      constraints,
       steps: trace.length,
       tool_calls: trace.length,
       context_chars: totalContextChars,
