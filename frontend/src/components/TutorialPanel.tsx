@@ -309,6 +309,7 @@ export function TutorialPanel({
   const [phase, setPhase] = useState(0);
   const [manualPositionKey, setManualPositionKey] = useState<string | null>(null);
   const cardRef = useRef<HTMLDivElement | null>(null);
+  const autoScrollKeyRef = useRef<string | null>(null);
   const dragRef = useRef<{
     pointerId: number;
     startX: number;
@@ -355,15 +356,14 @@ export function TutorialPanel({
       setRect(getTargetRect());
     };
     // Re-measure for a short window so the spotlight follows React Flow's
-    // fitView animation, then settle into a calm 600ms heartbeat.
+    // fitView animation. After that, scroll/resize events are enough; a
+    // heartbeat here fights the learner when they manually scroll back up.
     update();
     const timers = [120, 320, 600].map((delay) => window.setTimeout(update, delay));
-    const interval = window.setInterval(update, 600);
     window.addEventListener("resize", update);
     window.addEventListener("scroll", update, true);
     return () => {
       timers.forEach((timer) => window.clearTimeout(timer));
-      window.clearInterval(interval);
       window.removeEventListener("resize", update);
       window.removeEventListener("scroll", update, true);
     };
@@ -375,6 +375,7 @@ export function TutorialPanel({
 
   useEffect(() => {
     setManualPositionKey(null);
+    autoScrollKeyRef.current = null;
   }, [stepKey]);
 
   useEffect(() => {
@@ -390,7 +391,10 @@ export function TutorialPanel({
     if (isDragging || manualPositionKey === stepKey) {
       return;
     }
-    const targetRect = getTargetRect(true);
+    const targetKey = `${stepKey}:${isResultPhase ? (isRunning ? "running" : "ready") : "explain"}`;
+    const shouldAutoScroll = autoScrollKeyRef.current !== targetKey;
+    autoScrollKeyRef.current = targetKey;
+    const targetRect = getTargetRect(shouldAutoScroll);
     setRect(targetRect);
     setPosition(placePanelNearRect(targetRect, cardRef.current));
     const timer = window.setTimeout(() => {
